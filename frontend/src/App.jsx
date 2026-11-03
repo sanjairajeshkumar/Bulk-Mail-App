@@ -1,55 +1,118 @@
+
 import axios from "axios"
 import { useState } from "react"
 import * as XLSX from "xlsx"
 
 function App() {
 
-const [msg,setmsg]=useState(" ")
-const [status,setstatus] = useState(false)
-const [emailList,setEmailList]= useState([])
+  const [msg, setmsg] = useState("")
+  const [status, setstatus] = useState(false)
+  const [emailList, setEmailList] = useState([])
 
+  function handlemsg(evt) {
+    setmsg(evt.target.value)
+  }
 
-function  handlemsg(evt){
-  setmsg(evt.target.value)
-}
+  function handlefile(event) {
 
-function handlefile(event){
-  const file = event.target.files[0]
-    console.log(file)
+    const file = event.target.files[0]
+
+    if (!file) return
 
     const reader = new FileReader()
 
     reader.onload = function (event) {
+
+      try {
+
         const data = event.target.result
-        const workbook = XLSX.read(data,{type:'binary'})
+
+        const workbook = XLSX.read(data, { type: "array" })
+
         const sheetName = workbook.SheetNames[0]
         const worksheet = workbook.Sheets[sheetName]
-        const emailList = XLSX.utils.sheet_to_json(worksheet,{header:'A'})
-        const totalemail = emailList.map(function(item){return item.A})
-        console.log(totalemail)
+
+        const excelData = XLSX.utils.sheet_to_json(
+          worksheet,
+          { header: "A" }
+        )
+
+        const totalemail = excelData
+          .map(function (item) {
+            return String(item.A || "").trim()
+          })
+          .filter(function (email) {
+            return email.length > 0
+          })
+
         setEmailList(totalemail)
+
+        console.log(totalemail)
+
+      } catch (error) {
+
+        console.log(error)
+        alert("Unable to read Excel file")
+        setEmailList([])
+
+      }
+
     }
 
-    reader.readAsBinaryString(file)
+    reader.readAsArrayBuffer(file)
 
-}
-
-
-
-function send(){
-  setstatus(true)
-  axios.post("http://localhost:5000/sendemail",{msg:msg,emailList:emailList})
-  .then(function(data)
-{
-  if(data.data ===true){
-    alert("Email sent successfully")
-    setstatus(false)
   }
-  else{
-    alert("Failed")
+
+  async function send() {
+
+    if (!msg.trim()) {
+      alert("Please enter an email message")
+      return
+    }
+
+    if (emailList.length === 0) {
+      alert("Please upload an Excel file")
+      return
+    }
+
+    setstatus(true)
+
+    try {
+
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL}/sendemail`,
+        {
+          msg: msg,
+          emailList: emailList
+        }
+      )
+
+      if (response.data.success) {
+
+        alert("Email sent successfully")
+
+      } else {
+
+        alert("Failed to send emails")
+
+      }
+
+    } catch (error) {
+
+      console.log(error)
+
+      alert(
+        error.response?.data?.message ||
+        "Something went wrong"
+      )
+
+    } finally {
+
+      setstatus(false)
+
+    }
+
   }
-})
-}
 
   return (
     <div className="min-h-screen bg-[#f4f6fb] text-slate-800">
@@ -244,6 +307,7 @@ function send(){
 
                   <input
                     type="file"
+                    accept=".xlsx,.xls"
                     onChange={handlefile}
                     className="mx-auto mt-7 block w-full max-w-sm cursor-pointer rounded-lg border border-slate-200 bg-white text-xs text-slate-500 shadow-sm file:mr-4 file:cursor-pointer file:border-0 file:bg-indigo-600 file:px-5 file:py-3 file:font-semibold file:text-white hover:file:bg-indigo-700"
                   />
@@ -315,9 +379,10 @@ function send(){
 
                 <button
                   onClick={send}
-                  className="group flex w-full items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-700 px-6 py-4 text-sm font-bold text-white shadow-lg shadow-indigo-200 transition duration-300 hover:-translate-y-0.5 hover:from-indigo-700 hover:to-blue-800 hover:shadow-xl hover:shadow-indigo-200 active:translate-y-0"
+                  disabled={status}
+                  className="group flex w-full items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-700 px-6 py-4 text-sm font-bold text-white shadow-lg shadow-indigo-200 transition duration-300 hover:-translate-y-0.5 hover:from-indigo-700 hover:to-blue-800 hover:shadow-xl hover:shadow-indigo-200 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  <span>{status?"Sending...":"Send Campaign"}</span>
+                  <span>{status ? "Sending..." : "Send Campaign"}</span>
                   <span className="text-lg transition duration-300 group-hover:translate-x-1">
                     →
                   </span>
