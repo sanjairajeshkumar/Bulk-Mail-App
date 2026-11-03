@@ -2,6 +2,15 @@ import axios from "axios"
 import { useState } from "react"
 import * as XLSX from "xlsx"
 
+// Determine base API URL with fallback for dev and prod
+const API_BASE_URL = (
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? "http://localhost:5000" : "https://bulk-mail-backend-3gn6.onrender.com")
+).replace(/\/+$/, "")
+
+// Regex for validating email addresses
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 function App() {
 
   const [msg, setmsg] = useState("")
@@ -31,27 +40,47 @@ function App() {
         const sheetName = workbook.SheetNames[0]
         const worksheet = workbook.Sheets[sheetName]
 
-        const excelData = XLSX.utils.sheet_to_json(
-          worksheet,
-          { header: "A" }
-        )
+        // Extract rows as 2D array to inspect all cells (handles headers, column variations, etc.)
+        const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 })
+        const extracted = []
 
-        const totalemail = excelData
-          .map(function (item) {
-            return String(item.A || "").trim()
+        rawRows.forEach(function (row) {
+          if (Array.isArray(row)) {
+            row.forEach(function (cell) {
+              const val = String(cell || "").trim()
+              if (EMAIL_REGEX.test(val)) {
+                extracted.push(val.toLowerCase())
+              }
+            })
+          }
+        })
+
+        // Fallback for header: "A" format if 2D array parsing yielded no results
+        if (extracted.length === 0) {
+          const excelData = XLSX.utils.sheet_to_json(worksheet, { header: "A" })
+          excelData.forEach(function (item) {
+            const val = String(item.A || "").trim()
+            if (EMAIL_REGEX.test(val)) {
+              extracted.push(val.toLowerCase())
+            }
           })
-          .filter(function (email) {
-            return email.length > 0
-          })
+        }
+
+        // Deduplicate emails
+        const totalemail = [...new Set(extracted)]
+
+        if (totalemail.length === 0) {
+          alert("No valid email addresses found in the uploaded Excel file. Please ensure your file contains valid email addresses.")
+        }
 
         setEmailList(totalemail)
 
-        console.log(totalemail)
+        console.log("Extracted recipient emails:", totalemail)
 
       } catch (error) {
 
-        console.log(error)
-        alert("Unable to read Excel file")
+        console.error("Error reading Excel file:", error)
+        alert("Unable to read Excel file. Please ensure it is a valid .xlsx or .xls file.")
         setEmailList([])
 
       }
@@ -64,13 +93,16 @@ function App() {
 
   async function send() {
 
+    // Prevent duplicate concurrent submissions
+    if (status) return
+
     if (!msg.trim()) {
       alert("Please enter an email message")
       return
     }
 
     if (emailList.length === 0) {
-      alert("Please upload an Excel file")
+      alert("Please upload an Excel file with valid recipient email addresses")
       return
     }
 
@@ -79,31 +111,46 @@ function App() {
     try {
 
       const response = await axios.post(
-        `${import.meta.env.VITE_API_URL}/sendemail`,
+        `${API_BASE_URL}/sendemail`,
         {
           msg: msg,
           emailList: emailList
+        },
+        {
+          headers: {
+            "Content-Type": "application/json"
+          },
+          timeout: 60000
         }
       )
 
       if (response.data.success) {
 
-        alert("Email sent successfully")
+        alert(response.data.message || "Email sent successfully")
 
       } else {
 
-        alert("Failed to send emails")
+        alert(response.data.message || "Failed to send emails")
 
       }
 
     } catch (error) {
 
-      console.log(error)
+      console.error("Error sending emails:", error)
 
-      alert(
-        error.response?.data?.message ||
-        "Something went wrong"
-      )
+      let errorMessage = "Something went wrong"
+
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message
+      } else if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
+        errorMessage = "Request timed out while sending emails. Please check your backend logs."
+      } else if (error.code === "ERR_NETWORK" || error.message?.includes("Network Error")) {
+        errorMessage = `Network error: Unable to connect to backend at ${API_BASE_URL}. Please ensure the backend server is running and accessible.`
+      } else if (error.message) {
+        errorMessage = error.message
+      }
+
+      alert(errorMessage)
 
     } finally {
 
